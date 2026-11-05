@@ -1,0 +1,16 @@
+packages:
+  - .
+
+overrides:
+  vite@*: npm:@voidzero-dev/vite-plus-core@1.5.0
+
+# Vite+ versions its core as 1.x; the exported Vite API is 8.x.
+peerDependencyRules:
+  allowedVersions:
+    vite: '*'
+
+allowBuilds:
+  esbuild: true
+  workerd: true
+
+minimumReleaseAge: 0

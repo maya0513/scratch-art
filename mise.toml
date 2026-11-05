@@ -1,0 +1,22 @@
+[tools]
+node = "latest"
+pnpm = "latest"
+
+[settings]
+lockfile = true
+
+[tasks.install]
+description = "Install tools and project dependencies (human bootstrap)"
+run = ["mise install --locked", "pnpm install --frozen-lockfile"]
+
+[tasks.browsers]
+description = "Install browsers and their system dependencies"
+run = "pnpm exec vp run browsers:install"
+
+[tasks.update]
+description = "Update tools and all project dependencies"
+run = ["mise lock --bump", "mise install --locked", "pnpm exec vp run update"]
+
+[tasks.dev]
+description = "Start the development server"
+run = "pnpm exec vp run dev"

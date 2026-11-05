@@ -1,0 +1,47 @@
+name: Check and deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scratch-art-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CF_SEND_TELEMETRY: 'false'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v5
+        with:
+          install_args: --locked
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Install test browsers
+        run: pnpm exec vp run browsers:install
+      - name: Format, lint, type check, test and validate the build
+        run: pnpm exec vp run verify
+      - name: Deploy the validated build
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: pnpm exec vp run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Keep browser failure details
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-test-results
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
