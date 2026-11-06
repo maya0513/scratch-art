@@ -104,6 +104,10 @@ export default defineConfig(({ mode }) => ({
       'import/no-cycle': 'error',
       'import/no-duplicates': 'error',
       'import/no-unassigned-import': ['error', { allow: ['**/*.css'] }],
+      // A backstop against god files only: 500 lines of actual code, with
+      // blank lines and comments not counted (the pedantic default of 300
+      // counted everything and rewarded deleting documentation).
+      'eslint/max-lines': ['error', { max: 500, skipBlankLines: true, skipComments: true }],
       'eslint/max-lines-per-function': [
         'error',
         { max: 80, skipBlankLines: true, skipComments: true },
