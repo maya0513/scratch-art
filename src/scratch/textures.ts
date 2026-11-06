@@ -18,7 +18,6 @@ const MAX_CELL = 220;
 const MIN_CELL = 88;
 const GRAIN_SIZE = 256;
 
-/** Patch size follows the sheet's smaller side, so small screens fit more colours. */
 export function colorCellSize(width: number, height: number): number {
   return Math.min(MAX_CELL, Math.max(MIN_CELL, Math.min(width, height) / 3));
 }
@@ -85,12 +84,27 @@ function blackGrain(seed: number): HTMLCanvasElement {
       const fine = hash(seed, x, y, 9) / 4294967296;
       const tooth = hash(seed, Math.floor(x / 3), Math.floor(y / 3), 1) / 4294967296;
       const ridge = Math.sin(y * 1.9 + Math.sin(x * 0.025) * 2.5);
-      const value = 10 + fine * 8 + tooth * 4 + ridge * 1.4;
+      const value = 9 + fine * 9 + tooth * 5 + ridge * 1.6;
       const index = (y * GRAIN_SIZE + x) * 4;
       pixels.data[index] = value;
       pixels.data[index + 1] = value;
       pixels.data[index + 2] = value + 1;
       pixels.data[index + 3] = 255;
+    }
+  }
+  ctx.putImageData(pixels, 0, 0);
+  return canvas;
+}
+
+function holeTile(seed: number): HTMLCanvasElement {
+  const [canvas, ctx] = textureCanvas();
+  const pixels = ctx.createImageData(GRAIN_SIZE, GRAIN_SIZE);
+  for (let y = 0; y < GRAIN_SIZE; y++) {
+    for (let x = 0; x < GRAIN_SIZE; x++) {
+      const fine = hash(seed, x, y, 21) / 4294967296;
+      const tooth = hash(seed, Math.floor(x / 3), Math.floor(y / 3), 22) / 4294967296;
+      const strength = Math.max(0, fine * 0.55 + tooth * 0.45 - 0.905) / 0.095;
+      pixels.data[(y * GRAIN_SIZE + x) * 4 + 3] = Math.min(180, strength * 180);
     }
   }
   ctx.putImageData(pixels, 0, 0);
@@ -106,6 +120,7 @@ function patternAt(patterns: readonly CanvasPattern[], index: number): CanvasPat
 export class PaperTextures {
   readonly #colorTiles: HTMLCanvasElement[];
   readonly #waxTile: HTMLCanvasElement;
+  readonly #holeTile: HTMLCanvasElement;
 
   readonly #seed: number;
 
@@ -113,6 +128,7 @@ export class PaperTextures {
     this.#seed = seed;
     this.#colorTiles = COLORS.map((color) => crayonGrain(color, seed));
     this.#waxTile = blackGrain(seed);
+    this.#holeTile = holeTile(seed);
   }
 
   #pattern(ctx: CanvasRenderingContext2D, tile: HTMLCanvasElement): CanvasPattern {
@@ -160,7 +176,6 @@ export class PaperTextures {
     const strands = new Path2D();
     const lightRidges = new Path2D();
     const darkRidges = new Path2D();
-    // Work in paper coordinates so all pigments share the same underlying tooth.
     const point = (x: number, localY: number): Point => ({
       x: patch.x + x * cosine - localY * sine,
       y: patch.y + x * sine + localY * cosine,
@@ -191,7 +206,6 @@ export class PaperTextures {
       }
     }
 
-    // One textured stroke per path avoids repeatedly rasterizing the same grain.
     ctx.save();
     ctx.lineCap = 'round';
     ctx.strokeStyle = pattern;
@@ -213,34 +227,73 @@ export class PaperTextures {
     paperTransform(ctx, surface);
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
-    ctx.fillStyle = this.#pattern(ctx, this.#waxTile);
-    ctx.fillRect(-surface.width / 2, -surface.height / 2, surface.width, surface.height);
-    const size = 300;
-    for (
-      let row = Math.floor(-surface.height / 2 / size) - 1;
-      row <= Math.ceil(surface.height / 2 / size) + 1;
-      row++
-    ) {
-      for (
-        let column = Math.floor(-surface.width / 2 / size) - 1;
-        column <= Math.ceil(surface.width / 2 / size) + 1;
-        column++
-      ) {
-        const next = random(hash(this.#seed, column, row, 28));
-        ctx.save();
-        ctx.translate(column * size, row * size);
-        ctx.rotate((next() - 0.5) * 0.65);
-        for (let i = 0; i < 48; i++) {
-          const y = (next() - 0.5) * size;
-          ctx.strokeStyle = next() > 0.4 ? 'rgba(176,172,166,0.018)' : 'rgba(0,0,0,0.09)';
-          ctx.lineWidth = 0.3 + next() * 2;
-          ctx.beginPath();
-          ctx.moveTo(-size * 0.6, y);
-          ctx.quadraticCurveTo(0, y + (next() - 0.5) * 5, size * 0.6, y + (next() - 0.5) * 5);
-          ctx.stroke();
-        }
-        ctx.restore();
+    const next = random(hash(this.#seed, 41, 17, 3));
+    const { width, height } = surface;
+    const minDim = Math.min(width, height);
+    ctx.fillStyle = 'rgba(13,13,17,0.88)';
+    ctx.fillRect(-width / 2, -height / 2, width, height);
+    ctx.strokeStyle = this.#pattern(ctx, this.#waxTile);
+    ctx.lineCap = 'round';
+    const baseAngle = -0.62 + (next() - 0.5) * 0.24;
+    this.#strokePass(ctx, next, surface, baseAngle, minDim * 0.0128, minDim * 0.021, 0.985);
+    this.#strokePass(ctx, next, surface, baseAngle + 0.15, minDim * 0.0165, minDim * 0.017, 0.855);
+    this.#strokePass(ctx, next, surface, baseAngle - 0.5, minDim * 0.03, minDim * 0.013, 0.625);
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = this.#pattern(ctx, this.#holeTile);
+    ctx.fillRect(-width / 2, -height / 2, width, height);
+    this.#speckle(ctx, next, surface);
+    ctx.globalAlpha = 1;
+  }
+
+  #strokePass(
+    ctx: CanvasRenderingContext2D,
+    next: () => number,
+    surface: Surface,
+    angle: number,
+    spacing: number,
+    strokeWidth: number,
+    alpha: number,
+  ): void {
+    const dx = Math.cos(angle);
+    const dy = Math.sin(angle);
+    const diag = Math.hypot(surface.width, surface.height);
+    for (let d = -diag / 2; d < diag / 2; d += spacing * (0.75 + next() * 0.5)) {
+      const cx = -dy * d + (next() - 0.5) * spacing;
+      const cy = dx * d + (next() - 0.5) * spacing;
+      const length = diag * (0.92 + next() * 0.2);
+      const segments = 6;
+      let px = cx - (dx * length) / 2;
+      let py = cy - (dy * length) / 2;
+      for (let s = 1; s <= segments; s++) {
+        const t = s / segments;
+        const wander = s === segments ? 0 : (next() - 0.5) * strokeWidth * 0.35;
+        const qx = cx + dx * length * (t - 0.5) - dy * wander;
+        const qy = cy + dy * length * (t - 0.5) + dx * wander;
+        ctx.globalAlpha = Math.min(1, alpha * (0.78 + next() * 0.4));
+        ctx.lineWidth = strokeWidth * (0.7 + next() * 0.6);
+        ctx.beginPath();
+        ctx.moveTo(px, py);
+        ctx.lineTo(qx, qy);
+        ctx.stroke();
+        px = qx;
+        py = qy;
       }
+    }
+  }
+
+  #speckle(ctx: CanvasRenderingContext2D, next: () => number, surface: Surface): void {
+    const scale = surface.pixelWidth / surface.width;
+    const area = surface.pixelWidth * surface.pixelHeight;
+    const left = -surface.width / 2;
+    const top = -surface.height / 2;
+    ctx.globalCompositeOperation = 'source-over';
+    const flecks = Math.round(area * 0.0019);
+    for (let i = 0; i < flecks; i++) {
+      const size = (1 + next() * 2.6) / scale;
+      ctx.globalAlpha = 0.05 + next() * 0.15;
+      ctx.fillStyle = next() > 0.5 ? 'rgb(196,188,172)' : 'rgb(70,72,84)';
+      ctx.fillRect(left + next() * surface.width, top + next() * surface.height, size, size);
     }
   }
 }

@@ -1,26 +1,40 @@
 import { expect, test } from '@playwright/test';
 
-import { alphaAt, centerPixels, dimensions, line, ready, viewport } from './helpers';
+import { alphaAt, centerPixels, dimensions, line, meanAlphaAt, ready, viewport } from './helpers';
 
-test('starts fully coated, fills the screen, and exposes only one slider', async ({ page }) => {
+test('starts coated, fills the screen, and exposes only one slider', async ({ page }) => {
   await ready(page);
   const result = await page.locator('.wax-layer').evaluate((canvas: HTMLCanvasElement) => {
     const context = canvas.getContext('2d');
     if (context === null) throw new Error('Canvas 2D is unavailable.');
     const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
-    let opaque = true;
     let maximum = 0;
     let minimum = 255;
+    let alphaTotal = 0;
+    let thin = 0;
+    let bright = 0;
+    let minimumAlpha = 255;
+    let count = 0;
+    let lastRed = 0;
     for (const [index, value] of data.entries()) {
-      if (index % 4 === 3) opaque &&= value === 255;
-      if (index % 4 === 0) {
-        maximum = Math.max(maximum, value);
-        minimum = Math.min(minimum, value);
+      if (index % 4 === 0) lastRed = value;
+      if (index % 4 === 3) {
+        alphaTotal += value;
+        if (value < 153) thin += 1;
+        minimumAlpha = Math.min(minimumAlpha, value);
+        count += 1;
+        const shaded = (lastRed * value) / 255;
+        if (shaded >= 65) bright += 1;
+        maximum = Math.max(maximum, shaded);
+        minimum = Math.min(minimum, shaded);
       }
     }
     const rect = canvas.getBoundingClientRect();
     return {
-      opaque,
+      mean: alphaTotal / count,
+      thin: thin / count,
+      bright: bright / count,
+      minimumAlpha,
       maximum,
       minimum,
       pixels: canvas.width * canvas.height,
@@ -31,8 +45,10 @@ test('starts fully coated, fills the screen, and exposes only one slider', async
       overflow: document.documentElement.scrollHeight > innerHeight,
     };
   });
-  expect(result.opaque).toBe(true);
-  expect(result.maximum).toBeLessThan(65);
+  expect(result.mean).toBeGreaterThan(240);
+  expect(result.minimumAlpha).toBeLessThan(210);
+  expect(result.thin).toBeLessThan(0.02);
+  expect(result.bright).toBeLessThan(0.001);
   expect(result.maximum - result.minimum).toBeGreaterThan(5);
   expect(result.pixels).toBeLessThanOrEqual(6_000_000);
   expect(result.width).toBe(result.screenWidth);
@@ -88,10 +104,13 @@ test('slider changes the scratch width and never scratches the paper itself', as
   const x = Math.floor(size.width / 2);
   const thinY = Math.floor(size.height * 0.3);
   const thickY = Math.floor(size.height * 0.6);
+  const thinBase = await alphaAt(page, x, thinY + 4, 0.6);
   await line(page, { x: x - 30, y: thinY }, { x: x + 30, y: thinY });
   const box = await slider.boundingBox();
   if (box === null) throw new Error('The width slider must remain visible.');
   const sliderY = box.y + box.height / 2;
+  const sliderLeftBase = await alphaAt(page, box.x + 2, sliderY);
+  const sliderRightBase = await alphaAt(page, box.x + box.width - 2, sliderY);
   const pointAt = (clientX: number): Promise<void> =>
     info.project.use.hasTouch === true
       ? page.touchscreen.tap(clientX, sliderY)
@@ -105,9 +124,9 @@ test('slider changes the scratch width and never scratches the paper itself', as
   await expect(slider).toHaveValue('12');
   await line(page, { x: x - 30, y: thickY }, { x: x + 30, y: thickY });
   await expect.poll(() => alphaAt(page, x, thickY + 4, 0.6)).toBeLessThan(230);
-  expect(await alphaAt(page, x, thinY + 4, 0.6)).toBe(255);
-  expect(await alphaAt(page, box.x + 2, sliderY)).toBe(255);
-  expect(await alphaAt(page, box.x + box.width - 2, sliderY)).toBe(255);
+  expect(await alphaAt(page, x, thinY + 4, 0.6)).toBe(thinBase);
+  expect(await alphaAt(page, box.x + 2, sliderY)).toBe(sliderLeftBase);
+  expect(await alphaAt(page, box.x + box.width - 2, sliderY)).toBe(sliderRightBase);
 });
 
 test('repeated scratching removes more wax', async ({ page }) => {
@@ -164,7 +183,7 @@ test('keeps the initial paper intact and pointer input aligned after viewport ch
   expect(await alphaAt(page, size.width * 0.3, size.height * 0.65)).toBeLessThan(230);
 });
 
-test('a reload supplies new colors and a fully coated sheet', async ({ page }) => {
+test('a reload supplies new colors and a freshly coated sheet', async ({ page }) => {
   await ready(page);
   const color = await centerPixels(page, '.color-layer');
   const size = viewport(page);
@@ -172,7 +191,7 @@ test('a reload supplies new colors and a fully coated sheet', async ({ page }) =
   await expect.poll(() => alphaAt(page, size.width / 2, size.height / 2)).toBeLessThan(230);
   await ready(page);
   expect(await centerPixels(page, '.color-layer')).not.toEqual(color);
-  expect(await alphaAt(page, size.width / 2, size.height / 2)).toBe(255);
+  await expect.poll(() => meanAlphaAt(page, size.width / 2, size.height / 2)).toBeGreaterThan(200);
 });
 
 test('a second touch stops drawing until every pointer has lifted', async ({ page }, info) => {
@@ -185,70 +204,35 @@ test('a second touch stops drawing until every pointer has lifted', async ({ pag
     await expect.poll(() => alphaAt(page, x, y)).toBeLessThan(230);
   }
   const canvas = page.locator('.wax-layer');
-  await canvas.dispatchEvent('pointerdown', {
-    pointerId: 21,
-    pointerType: 'pen',
-    clientX: x - 30,
-    clientY: y + 50,
-  });
-  await canvas.dispatchEvent('pointerdown', {
-    pointerId: 22,
-    pointerType: 'touch',
-    clientX: x - 30,
-    clientY: y + 80,
-  });
-  await canvas.dispatchEvent('pointermove', {
-    pointerId: 21,
-    pointerType: 'pen',
-    clientX: x + 30,
-    clientY: y + 50,
-  });
-  await canvas.dispatchEvent('pointercancel', { pointerId: 21, pointerType: 'pen' });
-  await canvas.dispatchEvent('pointerup', {
-    pointerId: 22,
-    pointerType: 'touch',
-    clientX: x + 30,
-    clientY: y + 80,
-  });
-  await canvas.dispatchEvent('pointermove', {
-    pointerId: 21,
-    pointerType: 'pen',
-    clientX: x + 30,
-    clientY: y + 120,
-  });
+  const send = (type: string, id: number, kind: string, cx: number, cy: number): Promise<void> =>
+    canvas.dispatchEvent(type, { pointerId: id, pointerType: kind, clientX: cx, clientY: cy });
+  const spots: [number, number][] = [
+    [x, y + 50],
+    [x + 30, y + 50],
+    [x - 30, y + 80],
+    [x, y + 80],
+    [x, y + 65],
+    [x + 30, y + 110],
+  ];
+  const baselines = await Promise.all(spots.map(([px, py]) => alphaAt(page, px, py)));
+  await send('pointerdown', 21, 'pen', x - 30, y + 50);
+  await send('pointerdown', 22, 'touch', x - 30, y + 80);
+  await send('pointermove', 21, 'pen', x + 30, y + 50);
+  await send('pointercancel', 21, 'pen', x + 30, y + 50);
+  await send('pointerup', 22, 'touch', x + 30, y + 80);
+  await send('pointermove', 21, 'pen', x + 30, y + 120);
   await expect.poll(() => alphaAt(page, x - 30, y + 50)).toBeLessThan(220);
-  const alphas = await Promise.all([
-    alphaAt(page, x, y + 50),
-    alphaAt(page, x + 30, y + 50),
-    alphaAt(page, x - 30, y + 80),
-    alphaAt(page, x, y + 80),
-    alphaAt(page, x, y + 65),
-    alphaAt(page, x + 30, y + 110),
-  ]);
-  for (const alpha of alphas) expect(alpha).toBe(255);
+  const alphas = await Promise.all(spots.map(([px, py]) => alphaAt(page, px, py)));
+  for (const [index, alpha] of alphas.entries()) expect(alpha).toBe(baselines[index] ?? -1);
   await page.mouse.click(x, y + 140);
   await expect.poll(() => alphaAt(page, x, y + 140)).toBeLessThan(230);
-  await canvas.dispatchEvent('pointerdown', {
-    pointerId: 31,
-    pointerType: 'touch',
-    clientX: x - 30,
-    clientY: y + 170,
-  });
-  await canvas.dispatchEvent('pointermove', {
-    pointerId: 31,
-    pointerType: 'touch',
-    clientX: x,
-    clientY: y + 170,
-  });
-  await canvas.dispatchEvent('pointercancel', { pointerId: 31, pointerType: 'touch' });
-  await canvas.dispatchEvent('pointermove', {
-    pointerId: 31,
-    pointerType: 'touch',
-    clientX: x + 30,
-    clientY: y + 170,
-  });
+  const cancelBase = await alphaAt(page, x + 30, y + 170);
+  await send('pointerdown', 31, 'touch', x - 30, y + 170);
+  await send('pointermove', 31, 'touch', x, y + 170);
+  await send('pointercancel', 31, 'touch', x, y + 170);
+  await send('pointermove', 31, 'touch', x + 30, y + 170);
   await expect.poll(() => alphaAt(page, x, y + 170)).toBeLessThan(220);
-  expect(await alphaAt(page, x + 30, y + 170)).toBe(255);
+  expect(await alphaAt(page, x + 30, y + 170)).toBe(cancelBase);
 });
 
 test('undo restores the wax and redo scratches it again', async ({ page }) => {
@@ -256,12 +240,13 @@ test('undo restores the wax and redo scratches it again', async ({ page }) => {
   const size = viewport(page);
   const x = Math.floor(size.width / 2);
   const y = Math.floor(size.height * 0.35);
+  const base = await alphaAt(page, x, y);
   await line(page, { x: x - 40, y }, { x: x + 40, y });
   await expect.poll(() => alphaAt(page, x, y)).toBeLessThan(220);
   const undo = page.getByRole('button', { name: 'Undo' });
   await expect(undo).toBeEnabled();
   await undo.click();
-  await expect.poll(() => alphaAt(page, x, y)).toBe(255);
+  await expect.poll(() => alphaAt(page, x, y)).toBe(base);
   await expect(undo).toBeDisabled();
   const redo = page.getByRole('button', { name: 'Redo' });
   await expect(redo).toBeEnabled();
@@ -286,7 +271,7 @@ test('starting a new sheet asks first, then replaces colors and wax', async ({ p
   await page.getByRole('button', { name: 'New sheet' }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'New sheet' }).click();
   await expect(page.getByRole('dialog')).toBeHidden();
-  await expect.poll(() => alphaAt(page, x, y)).toBe(255);
+  await expect.poll(() => meanAlphaAt(page, x, y)).toBeGreaterThan(200);
   expect(await centerPixels(page, '.color-layer')).not.toEqual(color);
   await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
 });
