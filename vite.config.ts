@@ -95,7 +95,7 @@ export default defineConfig(({ mode }) => ({
               from: 'lib',
               name: ['CanvasRenderingContext2D', 'HTMLCanvasElement', 'PointerEvent'],
             },
-            { from: 'file', name: 'Stroke', path: './src/scratch/sheet.ts' },
+            { from: 'file', name: 'Stroke', path: './src/scratch/input.ts' },
             { from: 'package', name: 'Page', package: 'playwright-core' },
           ],
         },
