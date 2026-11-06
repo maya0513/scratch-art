@@ -1,9 +1,9 @@
-import { context2D } from './canvas';
 import { paperTransform } from './geometry';
 import type { Point, Surface } from './geometry';
+import { blackGrain, crayonGrain, holeTile } from './grain';
+import type { Color } from './grain';
 import { hash, random } from './random';
 
-type Color = readonly [number, number, number];
 const COLORS: readonly Color[] = [
   [234, 69, 80],
   [242, 139, 53],
@@ -16,7 +16,6 @@ const COLORS: readonly Color[] = [
 ];
 const MAX_CELL = 220;
 const MIN_CELL = 88;
-const GRAIN_SIZE = 256;
 
 export function colorCellSize(width: number, height: number): number {
   return Math.min(MAX_CELL, Math.max(MIN_CELL, Math.min(width, height) / 3));
@@ -44,81 +43,36 @@ export function crayonPatch(seed: number, column: number, row: number, cell: num
   };
 }
 
-function textureCanvas(): [HTMLCanvasElement, CanvasRenderingContext2D] {
-  const canvas = document.createElement('canvas');
-  canvas.width = GRAIN_SIZE;
-  canvas.height = GRAIN_SIZE;
-  const context = context2D(canvas);
-  return [canvas, context];
-}
-
-/** Grain belongs to the paper, rather than moving with each colored stroke. */
-function crayonGrain(color: Color, seed: number): HTMLCanvasElement {
-  const [canvas, ctx] = textureCanvas();
-  const pixels = ctx.createImageData(GRAIN_SIZE, GRAIN_SIZE);
-  const [red, green, blue] = color;
-  for (let y = 0; y < GRAIN_SIZE; y++) {
-    for (let x = 0; x < GRAIN_SIZE; x++) {
-      const fine = hash(seed, x, y) / 4294967296;
-      const tooth = hash(seed, Math.floor(x / 3), Math.floor(y / 3), 1) / 4294967296;
-      const fiber = Math.sin(y * 1.7 + Math.sin(x * 0.05) * 2) * 0.025;
-      const pigment = 0.79 + fine * 0.21 + tooth * 0.13 + fiber;
-      const pore = Math.max(0, (fine - 0.87) / 0.13) * (0.22 + tooth * 0.23);
-      const index = (y * GRAIN_SIZE + x) * 4;
-      const wax = pigment * (1 - pore);
-      pixels.data[index] = red * wax + 239 * pore;
-      pixels.data[index + 1] = green * wax + 224 * pore;
-      pixels.data[index + 2] = blue * wax + 196 * pore;
-      pixels.data[index + 3] = 255;
-    }
-  }
-  ctx.putImageData(pixels, 0, 0);
-  return canvas;
-}
-
-function blackGrain(seed: number): HTMLCanvasElement {
-  const [canvas, ctx] = textureCanvas();
-  const pixels = ctx.createImageData(GRAIN_SIZE, GRAIN_SIZE);
-  for (let y = 0; y < GRAIN_SIZE; y++) {
-    for (let x = 0; x < GRAIN_SIZE; x++) {
-      const fine = hash(seed, x, y, 9) / 4294967296;
-      const tooth = hash(seed, Math.floor(x / 3), Math.floor(y / 3), 1) / 4294967296;
-      const ridge = Math.sin(y * 1.9 + Math.sin(x * 0.025) * 2.5);
-      const value = 9 + fine * 9 + tooth * 5 + ridge * 1.6;
-      const index = (y * GRAIN_SIZE + x) * 4;
-      pixels.data[index] = value;
-      pixels.data[index + 1] = value;
-      pixels.data[index + 2] = value + 1;
-      pixels.data[index + 3] = 255;
-    }
-  }
-  ctx.putImageData(pixels, 0, 0);
-  return canvas;
-}
-
-function holeTile(seed: number): HTMLCanvasElement {
-  const [canvas, ctx] = textureCanvas();
-  const pixels = ctx.createImageData(GRAIN_SIZE, GRAIN_SIZE);
-  for (let y = 0; y < GRAIN_SIZE; y++) {
-    for (let x = 0; x < GRAIN_SIZE; x++) {
-      const fine = hash(seed, x, y, 21) / 4294967296;
-      const tooth = hash(seed, Math.floor(x / 3), Math.floor(y / 3), 22) / 4294967296;
-      const strength = Math.max(0, fine * 0.55 + tooth * 0.45 - 0.905) / 0.095;
-      pixels.data[(y * GRAIN_SIZE + x) * 4 + 3] = Math.min(180, strength * 180);
-    }
-  }
-  ctx.putImageData(pixels, 0, 0);
-  return canvas;
-}
-
 function patternAt(patterns: readonly CanvasPattern[], index: number): CanvasPattern {
   const pattern = patterns[index];
   if (pattern === undefined) throw new RangeError('Unknown crayon pigment.');
   return pattern;
 }
 
+interface Pigments {
+  readonly base: CanvasPattern;
+  readonly light: CanvasPattern;
+  readonly dark: CanvasPattern;
+}
+
+function silhouettePath(right: readonly Point[], left: readonly Point[]): Path2D {
+  const path = new Path2D();
+  for (const [index, edge] of right.entries()) {
+    if (index === 0) path.moveTo(edge.x, edge.y);
+    else path.lineTo(edge.x, edge.y);
+  }
+  for (let i = left.length - 1; i >= 0; i--) {
+    const edge = left[i];
+    if (edge !== undefined) path.lineTo(edge.x, edge.y);
+  }
+  path.closePath();
+  return path;
+}
+
 export class PaperTextures {
   readonly #colorTiles: HTMLCanvasElement[];
+  readonly #lightTiles: HTMLCanvasElement[];
+  readonly #darkTiles: HTMLCanvasElement[];
   readonly #waxTile: HTMLCanvasElement;
   readonly #holeTile: HTMLCanvasElement;
 
@@ -126,7 +80,9 @@ export class PaperTextures {
 
   constructor(seed: number) {
     this.#seed = seed;
-    this.#colorTiles = COLORS.map((color) => crayonGrain(color, seed));
+    this.#colorTiles = COLORS.map((color) => crayonGrain(color, seed, 'base'));
+    this.#lightTiles = COLORS.map((color) => crayonGrain(color, hash(seed, 7, 1), 'light'));
+    this.#darkTiles = COLORS.map((color) => crayonGrain(color, hash(seed, 7, 2), 'dark'));
     this.#waxTile = blackGrain(seed);
     this.#holeTile = holeTile(seed);
   }
@@ -143,6 +99,8 @@ export class PaperTextures {
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
     const patterns = this.#colorTiles.map((tile) => this.#pattern(ctx, tile));
+    const lightPatterns = this.#lightTiles.map((tile) => this.#pattern(ctx, tile));
+    const darkPatterns = this.#darkTiles.map((tile) => this.#pattern(ctx, tile));
     ctx.fillStyle = patternAt(patterns, this.#seed % COLORS.length);
     ctx.fillRect(-surface.width / 2, -surface.height / 2, surface.width, surface.height);
 
@@ -161,21 +119,29 @@ export class PaperTextures {
           Math.abs(patch.y) > surface.height / 2 + reach
         )
           continue;
-        this.#paintPatch(ctx, patch, patternAt(patterns, patch.color));
+        this.#paintPatch(ctx, patch, {
+          base: patternAt(patterns, patch.color),
+          light: patternAt(lightPatterns, patch.color),
+          dark: patternAt(darkPatterns, patch.color),
+        });
       }
     }
   }
 
-  #paintPatch(ctx: CanvasRenderingContext2D, patch: Patch, pattern: CanvasPattern): void {
+  #paintPatch(ctx: CanvasRenderingContext2D, patch: Patch, pigments: Pigments): void {
     const next = random(patch.seed ^ 0x53a8f0e7);
     const cosine = Math.cos(patch.angle);
     const sine = Math.sin(patch.angle);
     const height = patch.radius * 0.78;
     const rows = Math.ceil((height * 2) / 3.4);
     const pigment = new Path2D();
+    const lightRows = new Path2D();
+    const darkRows = new Path2D();
+    const lightPools = new Path2D();
+    const darkPools = new Path2D();
     const strands = new Path2D();
-    const lightRidges = new Path2D();
-    const darkRidges = new Path2D();
+    const right: Point[] = [];
+    const left: Point[] = [];
     const point = (x: number, localY: number): Point => ({
       x: patch.x + x * cosine - localY * sine,
       y: patch.y + x * sine + localY * cosine,
@@ -196,30 +162,36 @@ export class PaperTextures {
       const end = patch.radius * profile * (0.77 + next() * 0.21);
       const bend = (next() - 0.5) * 4;
       rowPath(pigment, start, end, y, bend);
-
-      // Uneven stroke ends and dry strands replace a sharply clipped silhouette.
-      if (next() > 0.72) {
-        rowPath(strands, start - next() * 7, end + next() * 7, y + 1.5, bend);
-      }
-      if (next() > 0.55) {
-        rowPath(next() > 0.45 ? lightRidges : darkRidges, start + 4, end - 4, y + 0.7, bend);
-      }
+      right.push(point(end + 4, y));
+      left.push(point(start - 4, y));
+      if (next() > 0.45) rowPath(lightRows, start + 4, end - 4, y + 1.1, bend);
+      if (next() > 0.5) rowPath(darkRows, start + 4, end - 4, y - 1.1, bend);
+      if (next() > 0.86) rowPath(next() > 0.5 ? lightPools : darkPools, start, end, y, bend);
+      if (next() > 0.72) rowPath(strands, start - next() * 7, end + next() * 7, y + 1.5, bend);
     }
-
     ctx.save();
+    ctx.clip(silhouettePath(right, left));
     ctx.lineCap = 'round';
-    ctx.strokeStyle = pattern;
+    ctx.strokeStyle = pigments.base;
     ctx.lineWidth = 6.4;
     ctx.stroke(pigment);
-    ctx.globalAlpha = 0.55;
-    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.12;
+    ctx.lineWidth = patch.radius * 0.55;
+    ctx.strokeStyle = pigments.light;
+    ctx.stroke(lightPools);
+    ctx.strokeStyle = pigments.dark;
+    ctx.stroke(darkPools);
+    ctx.globalAlpha = 0.38;
+    ctx.lineWidth = 4.6;
+    ctx.strokeStyle = pigments.light;
+    ctx.stroke(lightRows);
+    ctx.globalAlpha = 0.34;
+    ctx.strokeStyle = pigments.dark;
+    ctx.stroke(darkRows);
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1.1;
+    ctx.strokeStyle = pigments.base;
     ctx.stroke(strands);
-    ctx.globalAlpha = 1;
-    ctx.lineWidth = 0.8;
-    ctx.strokeStyle = 'rgba(255,239,196,0.065)';
-    ctx.stroke(lightRidges);
-    ctx.strokeStyle = 'rgba(30,20,18,0.06)';
-    ctx.stroke(darkRidges);
     ctx.restore();
   }
 
