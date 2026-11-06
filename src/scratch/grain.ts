@@ -76,3 +76,11 @@ export function holeTile(seed: number): HTMLCanvasElement {
   ctx.putImageData(pixels, 0, 0);
   return canvas;
 }
+
+/** A repeating pattern of a grain tile, at the scale pigment is laid down. */
+export function tilePattern(ctx: CanvasRenderingContext2D, tile: HTMLCanvasElement): CanvasPattern {
+  const pattern = ctx.createPattern(tile, 'repeat');
+  if (pattern === null) throw new Error('Cannot create a paper texture.');
+  pattern.setTransform(new DOMMatrix().scale(0.5));
+  return pattern;
+}
