@@ -11,6 +11,11 @@ interface Position {
   readonly y: number;
 }
 
+interface AlphaSample {
+  readonly mean: number;
+  readonly minimum: number;
+}
+
 export function viewport(page: Page): Size {
   const size = page.viewportSize();
   if (size === null) throw new Error('Tests require a fixed viewport.');
@@ -24,60 +29,8 @@ export function dimensions(page: Page): Promise<Size> {
   }));
 }
 
-export async function ready(page: Page): Promise<void> {
-  await page.goto('/');
-  await expect
-    .poll(
-      () =>
-        page.locator('.wax-layer').evaluate((canvas: HTMLCanvasElement) => {
-          const context = canvas.getContext('2d');
-          if (context === null) throw new Error('Canvas 2D is unavailable.');
-          const data = context.getImageData(
-            Math.floor(canvas.width / 2) - 64,
-            Math.floor(canvas.height / 2) - 64,
-            128,
-            128,
-          ).data;
-          let total = 0;
-          let count = 0;
-          for (const [index, value] of data.entries()) {
-            if (index % 4 === 3) {
-              total += value;
-              count += 1;
-            }
-          }
-          return total / count;
-        }),
-      { timeout: 15_000 },
-    )
-    .toBeGreaterThan(200);
-}
-
-export function alphaAt(page: Page, x: number, y: number, radius = 2): Promise<number> {
-  return page.locator('.wax-layer').evaluate(
-    (canvas: HTMLCanvasElement, point) => {
-      const context = canvas.getContext('2d');
-      if (context === null) throw new Error('Canvas 2D is unavailable.');
-      const rect = canvas.getBoundingClientRect();
-      const sx = canvas.width / rect.width;
-      const sy = canvas.height / rect.height;
-      const pixels = context.getImageData(
-        Math.floor((point.x - rect.left - point.radius) * sx),
-        Math.floor((point.y - rect.top - point.radius) * sy),
-        Math.max(1, Math.ceil(point.radius * 2 * sx)),
-        Math.max(1, Math.ceil(point.radius * 2 * sy)),
-      ).data;
-      let minimum = 255;
-      for (const [index, value] of pixels.entries()) {
-        if (index % 4 === 3) minimum = Math.min(minimum, value);
-      }
-      return minimum;
-    },
-    { x, y, radius },
-  );
-}
-
-export function meanAlphaAt(page: Page, x: number, y: number, radius = 3): Promise<number> {
+/** Mean and minimum wax alpha in a disc around a client point. */
+function sampleAlpha(page: Page, x: number, y: number, radius: number): Promise<AlphaSample> {
   return page.locator('.wax-layer').evaluate(
     (canvas: HTMLCanvasElement, point) => {
       const context = canvas.getContext('2d');
@@ -93,15 +46,61 @@ export function meanAlphaAt(page: Page, x: number, y: number, radius = 3): Promi
       ).data;
       let total = 0;
       let count = 0;
+      let minimum = 255;
       for (const [index, value] of pixels.entries()) {
         if (index % 4 === 3) {
           total += value;
           count += 1;
+          minimum = Math.min(minimum, value);
         }
       }
-      return total / count;
+      return { mean: total / count, minimum };
     },
     { x, y, radius },
+  );
+}
+
+export async function ready(page: Page): Promise<void> {
+  await page.goto('/');
+  const size = viewport(page);
+  await expect
+    .poll(async () => (await sampleAlpha(page, size.width / 2, size.height / 2, 64)).mean, {
+      // Painting a sheet is CPU-bound; allow for a heavily loaded machine.
+      timeout: 30_000,
+    })
+    .toBeGreaterThan(200);
+}
+
+export async function alphaAt(page: Page, x: number, y: number, radius = 2): Promise<number> {
+  return (await sampleAlpha(page, x, y, radius)).minimum;
+}
+
+export async function meanAlphaAt(page: Page, x: number, y: number, radius = 3): Promise<number> {
+  return (await sampleAlpha(page, x, y, radius)).mean;
+}
+
+/** Raw RGBA of the wax in a block around a client point, in device pixels. */
+export function regionPixels(
+  page: Page,
+  cx: number,
+  cy: number,
+  halfWidth: number,
+  halfHeight: number,
+): Promise<readonly number[]> {
+  return page.locator('.wax-layer').evaluate(
+    (canvas: HTMLCanvasElement, block) => {
+      const context = canvas.getContext('2d');
+      if (context === null) throw new Error('Canvas 2D is unavailable.');
+      const rect = canvas.getBoundingClientRect();
+      const sx = canvas.width / rect.width;
+      const sy = canvas.height / rect.height;
+      const x = Math.floor((block.cx - rect.left - block.halfWidth) * sx);
+      const y = Math.floor((block.cy - rect.top - block.halfHeight) * sy);
+      const width = Math.ceil(block.halfWidth * 2 * sx);
+      const height = Math.ceil(block.halfHeight * 2 * sy);
+      return Array.from(context.getImageData(x, y, width, height).data);
+    },
+    { cx, cy, halfWidth, halfHeight },
   );
 }
 
