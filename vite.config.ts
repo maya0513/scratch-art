@@ -124,7 +124,7 @@ export default defineConfig(({ mode }) => ({
       },
       { files: ['tools/**'], env: { node: true, browser: false } },
       // Signals deliberately exposes a mutable .value setter; React Compiler rules do not apply.
-      { files: ['src/app.tsx'], rules: { 'react/immutability': 'off' } },
+      { files: ['src/app.tsx', 'src/controls.tsx'], rules: { 'react/immutability': 'off' } },
       {
         files: ['src/**/*.test.ts'],
         plugins: ['typescript', 'unicorn', 'oxc', 'import', 'promise', 'vitest'],
