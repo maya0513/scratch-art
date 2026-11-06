@@ -1,5 +1,6 @@
 import { DIRECTIONS, ScratchBrush } from './brush';
 import { context2D } from './canvas';
+import { WaxCoat } from './coat';
 import { paperPoint, paperTransform, resampleSegment, surfaceSize } from './geometry';
 import type { Point, Surface } from './geometry';
 import { WaxHistory } from './history';
@@ -40,6 +41,7 @@ export class ScratchSheet {
   #drawingId = -1;
   #locked = false;
   #tool: Tool = 'scratch';
+  #coat: WaxCoat;
   #width = 2;
   #frame = 0;
   #dabCount = 0;
@@ -62,7 +64,8 @@ export class ScratchSheet {
     this.#view = new PaperView(waxCanvas, this.#surface);
     const textures = new PaperTextures(this.#seed);
     textures.paintColor(this.#color, this.#surface);
-    textures.paintWax(this.#wax, this.#surface);
+    this.#coat = new WaxCoat(textures.pristineWax(this.#surface), this.#surface);
+    this.#coat.apply(this.#wax);
     const options = { signal: this.#abort.signal };
     waxCanvas.addEventListener('pointerdown', this.#onDown, options);
     waxCanvas.addEventListener('pointermove', this.#onMove, options);
@@ -77,10 +80,8 @@ export class ScratchSheet {
       options,
     );
     window.addEventListener('blur', this.#clearActive, options);
-    waxCanvas.addEventListener('wheel', this.#onWheel, {
-      passive: false,
-      signal: this.#abort.signal,
-    });
+    const wheelOptions = { passive: false, signal: this.#abort.signal };
+    waxCanvas.addEventListener('wheel', this.#onWheel, wheelOptions);
   }
 
   setWidth(width: number): void {
@@ -111,15 +112,14 @@ export class ScratchSheet {
     this.#locked = false;
     this.#view.reset();
     this.#pending.length = 0;
-    if (this.#frame !== 0) {
-      cancelAnimationFrame(this.#frame);
-      this.#frame = 0;
-    }
+    if (this.#frame !== 0) cancelAnimationFrame(this.#frame);
+    this.#frame = 0;
     this.#seed = freshSeed();
     this.#dabCount = 0;
     const textures = new PaperTextures(this.#seed);
     textures.paintColor(this.#color, this.#surface);
-    textures.paintWax(this.#wax, this.#surface);
+    this.#coat = new WaxCoat(textures.pristineWax(this.#surface), this.#surface);
+    this.#coat.apply(this.#wax);
     this.#history.clear();
     this.#notifyHistory();
   }
@@ -133,14 +133,12 @@ export class ScratchSheet {
     this.#onHistoryChange?.(this.#history.canUndo, this.#history.canRedo);
   }
 
-  /** Run a scheduled flush now, which also closes the previous stroke. */
   #flushPending(): void {
     if (this.#frame === 0) return;
     cancelAnimationFrame(this.#frame);
     this.#flush();
   }
 
-  /** Record a finished stroke once the drawing pointer has lifted. */
   #finishGesture(): void {
     if (this.#drawing !== null || this.#frame !== 0) return;
     if (this.#history.endStroke()) this.#notifyHistory();
@@ -266,12 +264,15 @@ export class ScratchSheet {
     paperTransform(this.#wax, this.#surface);
     for (const dab of this.#pending) {
       const nib = this.#brush.get(dab.width, dab.direction, dab.variant);
-      this.#wax.globalCompositeOperation = dab.tool === 'coat' ? 'source-over' : 'destination-out';
       const size = nib.size;
       const x = dab.x - size / 2;
       const y = dab.y - size / 2;
-      const passes = dab.tool === 'coat' ? 3 : 1;
-      for (let pass = 0; pass < passes; pass++) this.#wax.drawImage(nib.canvas, x, y, size, size);
+      if (dab.tool === 'coat') {
+        this.#coat.stamp(this.#wax, x, y, size);
+      } else {
+        this.#wax.globalCompositeOperation = 'destination-out';
+        this.#wax.drawImage(nib.canvas, x, y, size, size);
+      }
       this.#history.expand(dab.x, dab.y, size);
     }
     this.#pending.length = 0;

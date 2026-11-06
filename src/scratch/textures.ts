@@ -1,3 +1,4 @@
+import { context2D } from './canvas';
 import { paperTransform } from './geometry';
 import type { Point, Surface } from './geometry';
 import { blackGrain, crayonGrain, holeTile } from './grain';
@@ -193,6 +194,15 @@ export class PaperTextures {
     ctx.strokeStyle = pigments.base;
     ctx.stroke(strands);
     ctx.restore();
+  }
+
+  /** Render this sheet's wax coating onto its own canvas, for exact refills. */
+  pristineWax(surface: Surface): HTMLCanvasElement {
+    const canvas = document.createElement('canvas');
+    canvas.width = surface.pixelWidth;
+    canvas.height = surface.pixelHeight;
+    this.paintWax(context2D(canvas), surface);
+    return canvas;
   }
 
   paintWax(ctx: CanvasRenderingContext2D, surface: Surface): void {
