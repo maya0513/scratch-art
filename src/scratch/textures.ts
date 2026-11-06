@@ -14,8 +14,14 @@ const COLORS: readonly Color[] = [
   [147, 99, 190],
   [221, 85, 146],
 ];
-const CELL = 220;
+const MAX_CELL = 220;
+const MIN_CELL = 88;
 const GRAIN_SIZE = 256;
+
+/** Patch size follows the sheet's smaller side, so small screens fit more colours. */
+export function colorCellSize(width: number, height: number): number {
+  return Math.min(MAX_CELL, Math.max(MIN_CELL, Math.min(width, height) / 3.5));
+}
 
 export interface Patch {
   readonly x: number;
@@ -26,13 +32,13 @@ export interface Patch {
   readonly seed: number;
 }
 
-export function crayonPatch(seed: number, column: number, row: number): Patch {
+export function crayonPatch(seed: number, column: number, row: number, cell: number): Patch {
   const patchSeed = hash(seed, column, row);
   const next = random(patchSeed);
   return {
-    x: column * CELL + (next() - 0.5) * CELL * 0.4,
-    y: row * CELL + (next() - 0.5) * CELL * 0.4,
-    radius: CELL * (0.92 + next() * 0.4),
+    x: column * cell + (next() - 0.5) * cell * 0.4,
+    y: row * cell + (next() - 0.5) * cell * 0.4,
+    radius: cell * (0.92 + next() * 0.4),
     angle: next() * Math.PI,
     color: Math.floor(next() * COLORS.length),
     seed: patchSeed,
@@ -125,13 +131,14 @@ export class PaperTextures {
     ctx.fillRect(-surface.width / 2, -surface.height / 2, surface.width, surface.height);
 
     // Include neighboring patches that can reach the paper's edges.
-    const firstColumn = Math.floor(-surface.width / 2 / CELL) - 2;
-    const lastColumn = Math.ceil(surface.width / 2 / CELL) + 2;
-    const firstRow = Math.floor(-surface.height / 2 / CELL) - 2;
-    const lastRow = Math.ceil(surface.height / 2 / CELL) + 2;
+    const cell = colorCellSize(surface.width, surface.height);
+    const firstColumn = Math.floor(-surface.width / 2 / cell) - 2;
+    const lastColumn = Math.ceil(surface.width / 2 / cell) + 2;
+    const firstRow = Math.floor(-surface.height / 2 / cell) - 2;
+    const lastRow = Math.ceil(surface.height / 2 / cell) + 2;
     for (let row = firstRow; row <= lastRow; row++) {
       for (let column = firstColumn; column <= lastColumn; column++) {
-        const patch = crayonPatch(this.#seed, column, row);
+        const patch = crayonPatch(this.#seed, column, row, cell);
         const reach = patch.radius * 1.3 + 12;
         if (
           Math.abs(patch.x) > surface.width / 2 + reach ||

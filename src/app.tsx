@@ -4,10 +4,150 @@ import { useCallback, useEffect, useMemo, useRef } from 'preact/hooks';
 
 import { ScratchSheet } from './scratch/sheet';
 
+const UNDO_PATH =
+  'M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z';
+const REDO_PATH =
+  'M11.5 8c2.65 0 5.05.99 6.9 2.6L22 7v9h-9l3.62-3.62c-1.39-1.16-3.16-1.88-5.12-1.88-3.54 0-6.55 2.31-7.6 5.5l-2.37-.78C2.92 11.03 6.85 8 11.5 8z';
+const NEW_SHEET_PATH =
+  'M6 2c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6H6zm7 7V3.5L18.5 9H13z';
+
+interface ToolButtonProps {
+  readonly label: string;
+  readonly path: string;
+  readonly className?: string;
+  readonly disabled?: boolean;
+  readonly onClick: () => void;
+}
+
+function ToolButton(props: ToolButtonProps): JSX.Element {
+  return (
+    <button
+      type="button"
+      class={props.className ?? 'tool-button'}
+      aria-label={props.label}
+      title={props.label}
+      disabled={props.disabled ?? false}
+      onClick={props.onClick}
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <path d={props.path} />
+      </svg>
+    </button>
+  );
+}
+
+interface ResetDialogProps {
+  readonly onCancel: () => void;
+  readonly onConfirm: () => void;
+}
+
+function ResetDialog(props: ResetDialogProps): JSX.Element {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const cancel = useRef<HTMLButtonElement>(null);
+  const { onCancel } = props;
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    const element = dialog.current;
+    if (element !== null) {
+      element.showModal();
+      cancel.current?.focus();
+      const handleCancel = (): void => {
+        onCancel();
+      };
+      element.addEventListener('cancel', handleCancel);
+      cleanup = () => {
+        element.removeEventListener('cancel', handleCancel);
+      };
+    }
+    return cleanup;
+  }, [onCancel]);
+  return (
+    <dialog ref={dialog} class="modal" aria-labelledby="new-sheet-title">
+      <h2 id="new-sheet-title">Start a new sheet?</h2>
+      <p>Your current sheet will be cleared and replaced with fresh colors.</p>
+      <div class="modal-actions">
+        <button ref={cancel} type="button" class="modal-button" onClick={props.onCancel}>
+          Cancel
+        </button>
+        <button type="button" class="modal-button primary" onClick={props.onConfirm}>
+          New sheet
+        </button>
+      </div>
+    </dialog>
+  );
+}
+
+interface ControlsProps {
+  readonly widthValue: number;
+  readonly canUndo: boolean;
+  readonly canRedo: boolean;
+  readonly onWidth: GenericEventHandler<HTMLInputElement>;
+  readonly onUndo: () => void;
+  readonly onRedo: () => void;
+  readonly onReset: () => void;
+}
+
+function Controls(props: ControlsProps): JSX.Element {
+  const confirmingReset = useSignal(false);
+  const { onReset } = props;
+  const askReset = useCallback((): void => {
+    confirmingReset.value = true;
+  }, [confirmingReset]);
+  const cancelReset = useCallback((): void => {
+    confirmingReset.value = false;
+  }, [confirmingReset]);
+  const confirmReset = useCallback((): void => {
+    confirmingReset.value = false;
+    onReset();
+  }, [confirmingReset, onReset]);
+  return (
+    <div class="controls">
+      <div class="width-control">
+        <input
+          type="range"
+          min="1"
+          max="12"
+          step="0.5"
+          value={props.widthValue}
+          aria-label="Scratch width"
+          aria-valuetext={`${props.widthValue} pixels`}
+          onInput={props.onWidth}
+        />
+      </div>
+      <div class="sheet-actions">
+        <ToolButton
+          label="Undo"
+          path={UNDO_PATH}
+          disabled={!props.canUndo}
+          onClick={props.onUndo}
+        />
+        <ToolButton
+          label="Redo"
+          path={REDO_PATH}
+          disabled={!props.canRedo}
+          onClick={props.onRedo}
+        />
+        <ToolButton
+          label="New sheet"
+          path={NEW_SHEET_PATH}
+          className="tool-button new-sheet-button"
+          onClick={askReset}
+        />
+      </div>
+      {confirmingReset.value ? (
+        <ResetDialog onCancel={cancelReset} onConfirm={confirmReset} />
+      ) : null}
+    </div>
+  );
+}
+
 export function App(): JSX.Element {
   const color = useRef<HTMLCanvasElement>(null);
   const wax = useRef<HTMLCanvasElement>(null);
-  const width = useSignal(2);
+  const sheet = useRef<ScratchSheet | null>(null);
+  const width = useSignal(6.5);
+  const canUndo = useSignal(false);
+  const canRedo = useSignal(false);
   const paperStyle = useMemo(
     () => ({ '--paper-ratio': window.innerWidth / window.innerHeight }),
     [],
@@ -18,26 +158,41 @@ export function App(): JSX.Element {
     },
     [width],
   );
+  const undo = useCallback((): void => {
+    sheet.current?.undo();
+  }, []);
+  const redo = useCallback((): void => {
+    sheet.current?.redo();
+  }, []);
+  const reset = useCallback((): void => {
+    sheet.current?.reset();
+  }, []);
 
   useEffect(() => {
     if (color.current === null || wax.current === null) {
       throw new Error('The paper canvases were not mounted.');
     }
-    const sheet = new ScratchSheet(color.current, wax.current);
+    const instance = new ScratchSheet(color.current, wax.current, (undoable, redoable) => {
+      canUndo.value = undoable;
+      canRedo.value = redoable;
+    });
+    sheet.current = instance;
     const stop = effect(() => {
-      sheet.setWidth(width.value);
+      instance.setWidth(width.value);
     });
     return () => {
       stop();
-      sheet.dispose();
+      instance.dispose();
+      sheet.current = null;
     };
-  }, [width]);
+  }, [width, canUndo, canRedo]);
 
   return (
     <main class="sheet">
       <p id="instructions" class="visually-hidden">
         Scratch the black crayon to reveal the colors underneath. Use the slider below to change the
-        scratch width. Reload the page for a new sheet.
+        scratch width, the arrow buttons to undo or redo a stroke, and the reset button to start a
+        new sheet.
       </p>
       <div class="paper" style={paperStyle}>
         <canvas ref={color} class="color-layer" aria-hidden="true" />
@@ -50,18 +205,15 @@ export function App(): JSX.Element {
           Scratch Art requires a browser that supports Canvas.
         </canvas>
       </div>
-      <div class="width-control">
-        <input
-          type="range"
-          min="1"
-          max="12"
-          step="0.5"
-          value={width.value}
-          aria-label="Scratch width"
-          aria-valuetext={`${width.value} pixels`}
-          onInput={changeWidth}
-        />
-      </div>
+      <Controls
+        widthValue={width.value}
+        canUndo={canUndo.value}
+        canRedo={canRedo.value}
+        onWidth={changeWidth}
+        onUndo={undo}
+        onRedo={redo}
+        onReset={reset}
+      />
     </main>
   );
 }

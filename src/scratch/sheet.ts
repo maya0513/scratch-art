@@ -2,6 +2,7 @@ import { DIRECTIONS, ScratchBrush } from './brush';
 import { context2D } from './canvas';
 import { paperPoint, paperTransform, resampleSegment, surfaceSize } from './geometry';
 import type { Point, Surface } from './geometry';
+import { WaxHistory } from './history';
 import { freshSeed, hash } from './random';
 import { PaperTextures } from './textures';
 
@@ -19,28 +20,37 @@ interface Dab extends Point {
 }
 
 export class ScratchSheet {
-  readonly #seed = freshSeed();
+  #seed = freshSeed();
   readonly #brush = new ScratchBrush();
   readonly #active = new Map<number, Stroke>();
   readonly #pending: Dab[] = [];
+  readonly #color: CanvasRenderingContext2D;
   readonly #wax: CanvasRenderingContext2D;
   readonly #surface: Surface;
+  readonly #history: WaxHistory;
+  readonly #onHistoryChange: ((canUndo: boolean, canRedo: boolean) => void) | undefined;
   readonly #abort = new AbortController();
   #width = 2;
   #frame = 0;
   #dabCount = 0;
 
-  constructor(colorCanvas: HTMLCanvasElement, waxCanvas: HTMLCanvasElement) {
+  constructor(
+    colorCanvas: HTMLCanvasElement,
+    waxCanvas: HTMLCanvasElement,
+    onHistoryChange?: (canUndo: boolean, canRedo: boolean) => void,
+  ) {
     const rect = waxCanvas.getBoundingClientRect();
     this.#surface = surfaceSize(rect.width, rect.height, window.devicePixelRatio);
     for (const canvas of [colorCanvas, waxCanvas]) {
       canvas.width = this.#surface.pixelWidth;
       canvas.height = this.#surface.pixelHeight;
     }
-    const color = context2D(colorCanvas, { alpha: false });
+    this.#color = context2D(colorCanvas, { alpha: false });
     this.#wax = context2D(waxCanvas);
+    this.#history = new WaxHistory(waxCanvas, this.#surface);
+    this.#onHistoryChange = onHistoryChange;
     const textures = new PaperTextures(this.#seed);
-    textures.paintColor(color, this.#surface);
+    textures.paintColor(this.#color, this.#surface);
     textures.paintWax(this.#wax, this.#surface);
     const options = { signal: this.#abort.signal };
     waxCanvas.addEventListener('pointerdown', this.#onDown, options);
@@ -62,6 +72,35 @@ export class ScratchSheet {
     this.#width = Math.max(1, Math.min(12, Math.round(width * 2) / 2));
   }
 
+  undo(): void {
+    if (this.#active.size > 0) return;
+    this.#flushPending();
+    if (this.#history.undo()) this.#notifyHistory();
+  }
+
+  redo(): void {
+    if (this.#active.size > 0) return;
+    this.#flushPending();
+    if (this.#history.redo()) this.#notifyHistory();
+  }
+
+  /** Replace the sheet with a freshly colored one, as a reload would. */
+  reset(): void {
+    this.#active.clear();
+    this.#pending.length = 0;
+    if (this.#frame !== 0) {
+      cancelAnimationFrame(this.#frame);
+      this.#frame = 0;
+    }
+    this.#seed = freshSeed();
+    this.#dabCount = 0;
+    const textures = new PaperTextures(this.#seed);
+    textures.paintColor(this.#color, this.#surface);
+    textures.paintWax(this.#wax, this.#surface);
+    this.#history.clear();
+    this.#notifyHistory();
+  }
+
   #eventPoint(event: PointerEvent): Point {
     return paperPoint(
       { x: event.clientX, y: event.clientY },
@@ -70,9 +109,31 @@ export class ScratchSheet {
     );
   }
 
+  #notifyHistory(): void {
+    this.#onHistoryChange?.(this.#history.canUndo, this.#history.canRedo);
+  }
+
+  /** Run a scheduled flush now, which also closes the previous stroke. */
+  #flushPending(): void {
+    if (this.#frame === 0) return;
+    cancelAnimationFrame(this.#frame);
+    this.#flush();
+  }
+
+  /** Record a finished stroke once every pointer has lifted. */
+  #finishGesture(): void {
+    if (this.#active.size > 0 || this.#frame !== 0) return;
+    if (this.#history.endStroke()) this.#notifyHistory();
+  }
+
   readonly #onDown = (event: PointerEvent): void => {
     if (event.button !== 0) return;
     event.preventDefault();
+    if (this.#active.size === 0) {
+      this.#flushPending();
+      this.#history.beginStroke();
+      this.#notifyHistory();
+    }
     const point = this.#eventPoint(event);
     this.#active.set(event.pointerId, {
       last: point,
@@ -90,6 +151,7 @@ export class ScratchSheet {
     event.preventDefault();
     if (event.pointerType === 'mouse' && (event.buttons & 1) === 0) {
       this.#active.delete(event.pointerId);
+      this.#finishGesture();
       return;
     }
     const optionalEvent: Partial<PointerEvent> = event;
@@ -104,14 +166,17 @@ export class ScratchSheet {
     this.#extend(stroke, this.#eventPoint(event));
     if (stroke.carried > 0.05) this.#enqueue(stroke.last, stroke.width, stroke.direction);
     this.#active.delete(event.pointerId);
+    this.#finishGesture();
   };
 
   readonly #onCancel = (event: PointerEvent): void => {
     this.#active.delete(event.pointerId);
+    this.#finishGesture();
   };
 
   readonly #clearActive = (): void => {
     this.#active.clear();
+    this.#finishGesture();
   };
 
   #extend(stroke: Stroke, point: Point): void {
@@ -152,8 +217,10 @@ export class ScratchSheet {
         nib.size,
         nib.size,
       );
+      this.#history.expand(dab.x, dab.y, nib.size);
     }
     this.#pending.length = 0;
+    this.#finishGesture();
   };
 
   dispose(): void {

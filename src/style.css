@@ -51,15 +51,24 @@ canvas {
   cursor: crosshair;
 }
 
-.width-control {
+.controls {
   position: absolute;
   bottom: max(8px, env(safe-area-inset-bottom));
   left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 16px);
+  transform: translateX(-50%);
+}
+
+.width-control {
+  position: relative;
   display: grid;
   width: 152px;
   height: 44px;
   place-items: center;
-  transform: translateX(-50%);
+  flex: none;
 }
 
 .width-control::before {
@@ -129,10 +138,144 @@ canvas {
   outline-offset: 4px;
 }
 
+.sheet-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tool-button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: 0;
+  padding: 0;
+  color: #d4d0c5;
+  background: rgba(24, 24, 29, 0.82);
+  border: 1px solid rgba(194, 191, 181, 0.38);
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.92;
+}
+
+.tool-button svg {
+  width: 21px;
+  height: 21px;
+  fill: currentColor;
+}
+
+.tool-button:hover,
+.tool-button:focus-visible {
+  opacity: 1;
+}
+
+.tool-button:focus-visible {
+  outline: 1px solid #c2bfb5;
+  outline-offset: 3px;
+}
+
+.tool-button:disabled {
+  opacity: 0.32;
+  cursor: default;
+}
+
+.new-sheet-button {
+  margin-left: 18px;
+}
+
+.modal {
+  width: min(320px, calc(100vw - 32px));
+  margin: auto;
+  padding: 20px;
+  color: #e9e6db;
+  background: #17171c;
+  border: 1px solid rgba(194, 191, 181, 0.28);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.modal::backdrop {
+  background: rgba(5, 5, 8, 0.62);
+}
+
+.modal h2 {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.modal p {
+  margin: 0 0 20px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: #bdb9ac;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.modal-button {
+  min-height: 40px;
+  margin: 0;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 14px;
+  color: #d4d0c5;
+  background: transparent;
+  border: 1px solid rgba(194, 191, 181, 0.38);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.modal-button:hover,
+.modal-button:focus-visible {
+  border-color: rgba(194, 191, 181, 0.7);
+}
+
+.modal-button:focus-visible {
+  outline: 1px solid #c2bfb5;
+  outline-offset: 2px;
+}
+
+.modal-button.primary {
+  color: #17171b;
+  background: #d4d0c5;
+  border-color: #d4d0c5;
+  font-weight: 600;
+}
+
 @media (forced-colors: active) {
   .width-control::before {
     background: CanvasText;
     opacity: 1;
+  }
+
+  .tool-button {
+    background: ButtonFace;
+    color: ButtonText;
+    border-color: ButtonText;
+    opacity: 1;
+  }
+
+  .tool-button:disabled {
+    color: GrayText;
+    border-color: GrayText;
+  }
+
+  .modal {
+    background: Canvas;
+    color: CanvasText;
+    border-color: CanvasText;
+  }
+
+  .modal-button {
+    background: ButtonFace;
+    color: ButtonText;
+    border-color: ButtonText;
   }
 }
 

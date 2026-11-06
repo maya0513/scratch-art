@@ -39,11 +39,13 @@ test('starts fully coated, fills the screen, and exposes only one slider', async
   expect(result.height).toBe(result.screenHeight);
   expect(result.overflow).toBe(false);
   const slider = page.getByRole('slider', { name: 'Scratch width' });
-  await expect(slider).toHaveValue('2');
+  await expect(slider).toHaveValue('6.5');
   await expect(slider).toHaveAttribute('min', '1');
   await expect(slider).toHaveAttribute('max', '12');
   await expect(page.getByRole('slider')).toHaveCount(1);
-  await expect(page.getByRole('button')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Redo' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'New sheet' })).toBeEnabled();
 });
 
 test('scratches a dot and a continuous fast line without changing distant wax', async ({
@@ -78,8 +80,9 @@ test('slider changes the scratch width and never scratches the paper itself', as
   const original = await centerPixels(page, '.wax-layer');
   const slider = page.getByRole('slider');
   await slider.focus();
+  await slider.press('Home');
   await slider.press('ArrowRight');
-  await expect(slider).toHaveValue('2.5');
+  await expect(slider).toHaveValue('1.5');
   expect(await centerPixels(page, '.wax-layer')).toEqual(original);
   const size = viewport(page);
   const x = Math.floor(size.width / 2);
@@ -234,4 +237,44 @@ test('handles touch or pen strokes independently and stops cancelled input', asy
   await expect.poll(() => alphaAt(page, x, y + 80)).toBeLessThan(220);
   expect(await alphaAt(page, x, y + 65)).toBe(255);
   expect(await alphaAt(page, x + 30, y + 110)).toBe(255);
+});
+
+test('undo restores the wax and redo scratches it again', async ({ page }) => {
+  await ready(page);
+  const size = viewport(page);
+  const x = Math.floor(size.width / 2);
+  const y = Math.floor(size.height * 0.35);
+  await line(page, { x: x - 40, y }, { x: x + 40, y });
+  await expect.poll(() => alphaAt(page, x, y)).toBeLessThan(220);
+  const undo = page.getByRole('button', { name: 'Undo' });
+  await expect(undo).toBeEnabled();
+  await undo.click();
+  await expect.poll(() => alphaAt(page, x, y)).toBe(255);
+  await expect(undo).toBeDisabled();
+  const redo = page.getByRole('button', { name: 'Redo' });
+  await expect(redo).toBeEnabled();
+  await redo.click();
+  await expect.poll(() => alphaAt(page, x, y)).toBeLessThan(220);
+});
+
+test('starting a new sheet asks first, then replaces colors and wax', async ({ page }) => {
+  await ready(page);
+  const size = viewport(page);
+  const x = Math.floor(size.width / 2);
+  const y = Math.floor(size.height * 0.35);
+  const color = await centerPixels(page, '.color-layer');
+  await line(page, { x: x - 40, y }, { x: x + 40, y });
+  await expect.poll(() => alphaAt(page, x, y)).toBeLessThan(220);
+  await page.getByRole('button', { name: 'New sheet' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  expect(await alphaAt(page, x, y)).toBeLessThan(220);
+  await page.getByRole('button', { name: 'New sheet' }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'New sheet' }).click();
+  await expect(page.getByRole('dialog')).toBeHidden();
+  await expect.poll(() => alphaAt(page, x, y)).toBe(255);
+  expect(await centerPixels(page, '.color-layer')).not.toEqual(color);
+  await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
 });
