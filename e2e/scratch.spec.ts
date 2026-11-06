@@ -175,9 +175,7 @@ test('a reload supplies new colors and a fully coated sheet', async ({ page }) =
   expect(await alphaAt(page, size.width / 2, size.height / 2)).toBe(255);
 });
 
-test('handles touch or pen strokes independently and stops cancelled input', async ({
-  page,
-}, info) => {
+test('a second touch stops drawing until every pointer has lifted', async ({ page }, info) => {
   await ready(page);
   const size = viewport(page);
   const x = Math.floor(size.width / 2);
@@ -190,53 +188,67 @@ test('handles touch or pen strokes independently and stops cancelled input', asy
   await canvas.dispatchEvent('pointerdown', {
     pointerId: 21,
     pointerType: 'pen',
-    button: 0,
-    buttons: 1,
     clientX: x - 30,
     clientY: y + 50,
   });
   await canvas.dispatchEvent('pointerdown', {
     pointerId: 22,
     pointerType: 'touch',
-    button: 0,
-    buttons: 1,
     clientX: x - 30,
     clientY: y + 80,
   });
   await canvas.dispatchEvent('pointermove', {
     pointerId: 21,
     pointerType: 'pen',
-    buttons: 1,
     clientX: x + 30,
     clientY: y + 50,
-  });
-  await canvas.dispatchEvent('pointermove', {
-    pointerId: 22,
-    pointerType: 'touch',
-    buttons: 1,
-    clientX: x + 30,
-    clientY: y + 80,
   });
   await canvas.dispatchEvent('pointercancel', { pointerId: 21, pointerType: 'pen' });
   await canvas.dispatchEvent('pointerup', {
     pointerId: 22,
     pointerType: 'touch',
-    button: 0,
-    buttons: 0,
     clientX: x + 30,
     clientY: y + 80,
   });
   await canvas.dispatchEvent('pointermove', {
     pointerId: 21,
     pointerType: 'pen',
-    buttons: 1,
     clientX: x + 30,
     clientY: y + 120,
   });
-  await expect.poll(() => alphaAt(page, x, y + 50)).toBeLessThan(220);
-  await expect.poll(() => alphaAt(page, x, y + 80)).toBeLessThan(220);
-  expect(await alphaAt(page, x, y + 65)).toBe(255);
-  expect(await alphaAt(page, x + 30, y + 110)).toBe(255);
+  await expect.poll(() => alphaAt(page, x - 30, y + 50)).toBeLessThan(220);
+  const alphas = await Promise.all([
+    alphaAt(page, x, y + 50),
+    alphaAt(page, x + 30, y + 50),
+    alphaAt(page, x - 30, y + 80),
+    alphaAt(page, x, y + 80),
+    alphaAt(page, x, y + 65),
+    alphaAt(page, x + 30, y + 110),
+  ]);
+  for (const alpha of alphas) expect(alpha).toBe(255);
+  await page.mouse.click(x, y + 140);
+  await expect.poll(() => alphaAt(page, x, y + 140)).toBeLessThan(230);
+  await canvas.dispatchEvent('pointerdown', {
+    pointerId: 31,
+    pointerType: 'touch',
+    clientX: x - 30,
+    clientY: y + 170,
+  });
+  await canvas.dispatchEvent('pointermove', {
+    pointerId: 31,
+    pointerType: 'touch',
+    clientX: x,
+    clientY: y + 170,
+  });
+  await canvas.dispatchEvent('pointercancel', { pointerId: 31, pointerType: 'touch' });
+  await canvas.dispatchEvent('pointermove', {
+    pointerId: 31,
+    pointerType: 'touch',
+    clientX: x + 30,
+    clientY: y + 170,
+  });
+  await expect.poll(() => alphaAt(page, x, y + 170)).toBeLessThan(220);
+  expect(await alphaAt(page, x + 30, y + 170)).toBe(255);
 });
 
 test('undo restores the wax and redo scratches it again', async ({ page }) => {

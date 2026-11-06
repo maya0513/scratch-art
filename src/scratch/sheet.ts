@@ -22,7 +22,7 @@ interface Dab extends Point {
 export class ScratchSheet {
   #seed = freshSeed();
   readonly #brush = new ScratchBrush();
-  readonly #active = new Map<number, Stroke>();
+  readonly #held = new Set<number>();
   readonly #pending: Dab[] = [];
   readonly #color: CanvasRenderingContext2D;
   readonly #wax: CanvasRenderingContext2D;
@@ -30,6 +30,9 @@ export class ScratchSheet {
   readonly #history: WaxHistory;
   readonly #onHistoryChange: ((canUndo: boolean, canRedo: boolean) => void) | undefined;
   readonly #abort = new AbortController();
+  #drawing: Stroke | null = null;
+  #drawingId = -1;
+  #locked = false;
   #width = 2;
   #frame = 0;
   #dabCount = 0;
@@ -73,20 +76,23 @@ export class ScratchSheet {
   }
 
   undo(): void {
-    if (this.#active.size > 0) return;
+    if (this.#drawing !== null) return;
     this.#flushPending();
     if (this.#history.undo()) this.#notifyHistory();
   }
 
   redo(): void {
-    if (this.#active.size > 0) return;
+    if (this.#drawing !== null) return;
     this.#flushPending();
     if (this.#history.redo()) this.#notifyHistory();
   }
 
   /** Replace the sheet with a freshly colored one, as a reload would. */
   reset(): void {
-    this.#active.clear();
+    this.#drawing = null;
+    this.#drawingId = -1;
+    this.#held.clear();
+    this.#locked = false;
     this.#pending.length = 0;
     if (this.#frame !== 0) {
       cancelAnimationFrame(this.#frame);
@@ -120,37 +126,49 @@ export class ScratchSheet {
     this.#flush();
   }
 
-  /** Record a finished stroke once every pointer has lifted. */
+  /** Record a finished stroke once the drawing pointer has lifted. */
   #finishGesture(): void {
-    if (this.#active.size > 0 || this.#frame !== 0) return;
+    if (this.#drawing !== null || this.#frame !== 0) return;
     if (this.#history.endStroke()) this.#notifyHistory();
   }
 
   readonly #onDown = (event: PointerEvent): void => {
     if (event.button !== 0) return;
     event.preventDefault();
-    if (this.#active.size === 0) {
+    if (this.#held.has(event.pointerId)) return;
+    this.#held.add(event.pointerId);
+    if (this.#drawing === null && !this.#locked) {
       this.#flushPending();
       this.#history.beginStroke();
       this.#notifyHistory();
+      const point = this.#eventPoint(event);
+      this.#drawing = {
+        last: point,
+        carried: 0,
+        width: this.#width,
+        direction: 0,
+      };
+      this.#drawingId = event.pointerId;
+      if (event.isTrusted) this.#wax.canvas.setPointerCapture(event.pointerId);
+      this.#enqueue(point, this.#width, 0);
+      return;
     }
-    const point = this.#eventPoint(event);
-    this.#active.set(event.pointerId, {
-      last: point,
-      carried: 0,
-      width: this.#width,
-      direction: 0,
-    });
-    if (event.isTrusted) this.#wax.canvas.setPointerCapture(event.pointerId);
-    this.#enqueue(point, this.#width, 0);
+    // A second pointer means a gesture such as a pinch, never a drawing:
+    // end the current stroke and stay locked until every pointer lifts.
+    this.#locked = true;
+    this.#drawing = null;
+    this.#drawingId = -1;
+    this.#finishGesture();
   };
 
   readonly #onMove = (event: PointerEvent): void => {
-    const stroke = this.#active.get(event.pointerId);
-    if (stroke === undefined) return;
+    if (this.#drawing === null || event.pointerId !== this.#drawingId) return;
+    const stroke = this.#drawing;
     event.preventDefault();
     if (event.pointerType === 'mouse' && (event.buttons & 1) === 0) {
-      this.#active.delete(event.pointerId);
+      this.#drawing = null;
+      this.#drawingId = -1;
+      this.#release(event.pointerId);
       this.#finishGesture();
       return;
     }
@@ -161,23 +179,38 @@ export class ScratchSheet {
   };
 
   readonly #onUp = (event: PointerEvent): void => {
-    const stroke = this.#active.get(event.pointerId);
-    if (stroke === undefined) return;
+    this.#release(event.pointerId);
+    if (this.#drawing === null || event.pointerId !== this.#drawingId) return;
+    const stroke = this.#drawing;
     this.#extend(stroke, this.#eventPoint(event));
     if (stroke.carried > 0.05) this.#enqueue(stroke.last, stroke.width, stroke.direction);
-    this.#active.delete(event.pointerId);
+    this.#drawing = null;
+    this.#drawingId = -1;
     this.#finishGesture();
   };
 
   readonly #onCancel = (event: PointerEvent): void => {
-    this.#active.delete(event.pointerId);
+    this.#release(event.pointerId);
+    if (event.pointerId === this.#drawingId) {
+      this.#drawing = null;
+      this.#drawingId = -1;
+    }
     this.#finishGesture();
   };
 
   readonly #clearActive = (): void => {
-    this.#active.clear();
+    this.#drawing = null;
+    this.#drawingId = -1;
+    this.#held.clear();
+    this.#locked = false;
     this.#finishGesture();
   };
+
+  /** Forget a lifted pointer; the lock ends when the last one lifts. */
+  #release(pointerId: number): void {
+    this.#held.delete(pointerId);
+    if (this.#held.size === 0) this.#locked = false;
+  }
 
   #extend(stroke: Stroke, point: Point): void {
     const dx = point.x - stroke.last.x;
@@ -225,7 +258,10 @@ export class ScratchSheet {
 
   dispose(): void {
     this.#abort.abort();
-    this.#active.clear();
+    this.#drawing = null;
+    this.#drawingId = -1;
+    this.#held.clear();
+    this.#locked = false;
     this.#pending.length = 0;
     if (this.#frame !== 0) cancelAnimationFrame(this.#frame);
   }
