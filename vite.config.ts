@@ -162,24 +162,6 @@ export default defineConfig(({ mode }) => ({
           output: [],
         },
       },
-      lint: {
-        command: 'vp lint --deny-warnings',
-        cache: {
-          untrackedEnv: taskEnvironment,
-          input: [
-            'src/**',
-            'e2e/**',
-            'tools/**',
-            '*.ts',
-            'tsconfig.json',
-            'package.json',
-            'pnpm-lock.yaml',
-            'pnpm-workspace.yaml',
-            'mise.lock',
-          ],
-          output: [],
-        },
-      },
       check: {
         command: 'vp check --deny-warnings',
         cache: {
@@ -194,6 +176,8 @@ export default defineConfig(({ mode }) => ({
             '*.yaml',
             '*.md',
             '.gitignore',
+            'pnpm-lock.yaml',
+            'pnpm-workspace.yaml',
             'mise.lock',
             'index.html',
             'public/**',
@@ -249,7 +233,11 @@ export default defineConfig(({ mode }) => ({
         dependsOn: ['build'],
         cache: false,
       },
-      deploy: { command: 'cf deploy --prebuilt --mode production', cache: false },
+      deploy: {
+        command: 'cf deploy --prebuilt --mode production',
+        dependsOn: ['build'],
+        cache: false,
+      },
       verify: {
         command: 'node tools/check-project.ts',
         dependsOn: ['check', 'test', 'e2e', 'deploy:check'],
