@@ -20,7 +20,7 @@ const GRAIN_SIZE = 256;
 
 /** Patch size follows the sheet's smaller side, so small screens fit more colours. */
 export function colorCellSize(width: number, height: number): number {
-  return Math.min(MAX_CELL, Math.max(MIN_CELL, Math.min(width, height) / 3.5));
+  return Math.min(MAX_CELL, Math.max(MIN_CELL, Math.min(width, height) / 3));
 }
 
 export interface Patch {

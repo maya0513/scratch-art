@@ -31,8 +31,8 @@ describe('a fresh but stable sheet', () => {
   });
 
   it('shrinks colour cells on small sheets and keeps the classic size on large ones', () => {
-    expect(colorCellSize(390, 844)).toBeCloseTo(390 / 3.5);
-    expect(colorCellSize(844, 390)).toBeCloseTo(390 / 3.5);
+    expect(colorCellSize(390, 844)).toBeCloseTo(390 / 3);
+    expect(colorCellSize(844, 390)).toBeCloseTo(390 / 3);
     expect(colorCellSize(1440, 900)).toBe(220);
     expect(colorCellSize(200, 200)).toBe(88);
   });
