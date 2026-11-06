@@ -218,7 +218,8 @@ test('a second touch stops drawing until every pointer has lifted', async ({ pag
   await send('pointerdown', 21, 'pen', x - 30, y + 50);
   await send('pointerdown', 22, 'touch', x - 30, y + 80);
   await send('pointermove', 21, 'pen', x + 30, y + 50);
-  await send('pointercancel', 21, 'pen', x + 30, y + 50);
+  await send('pointermove', 21, 'pen', x - 30, y + 50);
+  await send('pointercancel', 21, 'pen', x - 30, y + 50);
   await send('pointerup', 22, 'touch', x + 30, y + 80);
   await send('pointermove', 21, 'pen', x + 30, y + 120);
   await expect.poll(() => alphaAt(page, x - 30, y + 50)).toBeLessThan(220);

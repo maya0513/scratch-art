@@ -9,7 +9,6 @@ body,
 #app {
   width: 100%;
   height: 100%;
-  touch-action: none;
   margin: 0;
   overflow: hidden;
   overscroll-behavior: none;
@@ -29,6 +28,7 @@ body,
   position: relative;
   width: min(100%, calc(100dvh * var(--paper-ratio)));
   aspect-ratio: var(--paper-ratio);
+  transform-origin: 0 0;
 }
 
 canvas {
@@ -157,7 +157,7 @@ canvas {
   border: 1px solid rgba(194, 191, 181, 0.38);
   border-radius: 50%;
   cursor: pointer;
-  touch-action: none;
+  touch-action: manipulation;
   opacity: 0.92;
 }
 
@@ -180,6 +180,20 @@ canvas {
 .tool-button:disabled {
   opacity: 0.32;
   cursor: default;
+}
+
+.tool-button[aria-pressed='true'] {
+  color: #17171b;
+  background: #d4d0c5;
+  opacity: 1;
+}
+
+.tool-button svg.stroke-icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .new-sheet-button {
@@ -231,7 +245,7 @@ canvas {
   border: 1px solid rgba(194, 191, 181, 0.38);
   border-radius: 8px;
   cursor: pointer;
-  touch-action: none;
+  touch-action: manipulation;
 }
 
 .modal-button:hover,
