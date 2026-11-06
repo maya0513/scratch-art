@@ -265,6 +265,60 @@ canvas {
   font-weight: 600;
 }
 
+@media (max-width: 560px) {
+  .controls {
+    flex-wrap: wrap;
+    justify-content: center;
+    row-gap: 2px;
+    width: calc(100vw - 16px);
+  }
+
+  .sheet-actions {
+    gap: 6px;
+  }
+
+  .tool-button {
+    width: 40px;
+    height: 40px;
+  }
+
+  .tool-button svg {
+    width: 19px;
+    height: 19px;
+  }
+
+  .new-sheet-button {
+    margin-left: 12px;
+  }
+}
+
+@media (max-width: 360px) {
+  .width-control {
+    width: 136px;
+  }
+
+  .width-control::before {
+    width: 98px;
+  }
+
+  .width-control input {
+    width: 112px;
+  }
+
+  .sheet-actions {
+    gap: 5px;
+  }
+
+  .tool-button {
+    width: 37px;
+    height: 37px;
+  }
+
+  .new-sheet-button {
+    margin-left: 10px;
+  }
+}
+
 @media (forced-colors: active) {
   .width-control::before {
     background: CanvasText;
