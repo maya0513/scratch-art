@@ -12,6 +12,10 @@ body,
   margin: 0;
   overflow: hidden;
   overscroll-behavior: none;
+  /* A drawing surface: long presses must never start a text selection. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 .sheet {
