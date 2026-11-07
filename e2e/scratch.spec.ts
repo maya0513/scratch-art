@@ -194,7 +194,9 @@ test('a reload supplies new colors and a freshly coated sheet', async ({ page })
   await expect.poll(() => meanAlphaAt(page, size.width / 2, size.height / 2)).toBeGreaterThan(200);
 });
 
-test('a second touch stops drawing until every pointer has lifted', async ({ page }, info) => {
+test('a second touch takes back the partial stroke and locks drawing until every pointer has lifted', async ({
+  page,
+}, info) => {
   await ready(page);
   const size = viewport(page);
   const x = Math.floor(size.width / 2);
@@ -215,6 +217,7 @@ test('a second touch stops drawing until every pointer has lifted', async ({ pag
     [x + 30, y + 110],
   ];
   const baselines = await Promise.all(spots.map(([px, py]) => alphaAt(page, px, py)));
+  const dabBase = await alphaAt(page, x - 30, y + 50);
   await send('pointerdown', 21, 'pen', x - 30, y + 50);
   await send('pointerdown', 22, 'touch', x - 30, y + 80);
   await send('pointermove', 21, 'pen', x + 30, y + 50);
@@ -222,9 +225,14 @@ test('a second touch stops drawing until every pointer has lifted', async ({ pag
   await send('pointercancel', 21, 'pen', x - 30, y + 50);
   await send('pointerup', 22, 'touch', x + 30, y + 80);
   await send('pointermove', 21, 'pen', x + 30, y + 120);
-  await expect.poll(() => alphaAt(page, x - 30, y + 50)).toBeLessThan(220);
+  // The pinch claimed the gesture, so the pen's opening dab is taken back
+  // and the aborted stroke leaves no history entry behind.
+  await expect.poll(() => alphaAt(page, x - 30, y + 50)).toBe(dabBase);
   const alphas = await Promise.all(spots.map(([px, py]) => alphaAt(page, px, py)));
   for (const [index, alpha] of alphas.entries()) expect(alpha).toBe(baselines[index] ?? -1);
+  if (info.project.use.hasTouch !== true) {
+    await expect(page.getByRole('button', { name: 'Undo' })).toBeDisabled();
+  }
   await page.mouse.click(x, y + 140);
   await expect.poll(() => alphaAt(page, x, y + 140)).toBeLessThan(230);
   const cancelBase = await alphaAt(page, x + 30, y + 170);

@@ -65,6 +65,13 @@ export class StrokePainter {
     if (this.#frame === 0) this.#frame = requestAnimationFrame(this.#flush);
   }
 
+  /** Drop every queued dab without rendering it, for an abandoned stroke. */
+  discardPending(): void {
+    this.#pending.length = 0;
+    if (this.#frame !== 0) cancelAnimationFrame(this.#frame);
+    this.#frame = 0;
+  }
+
   /** Run a scheduled flush now, which also closes the previous stroke. */
   flushPending(): void {
     if (this.#frame === 0) return;

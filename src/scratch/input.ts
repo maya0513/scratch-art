@@ -22,6 +22,8 @@ export interface StrokeSink {
   dab(point: Point, width: number, direction: number, tool: Tool): void;
   /** A gesture may have finished; close the history stroke if all is settled. */
   settled(): void;
+  /** Abandon the active stroke and take back its marks. */
+  cancelStroke(): void;
 }
 
 /**
@@ -86,10 +88,11 @@ export class PointerInput {
     if (this.#points.has(event.pointerId)) return;
     this.#points.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (this.#points.size === 2) {
-      // A second pointer starts a pinch: end the stroke, hand over the view.
+      // A second pointer starts a pinch: its first finger was never drawing,
+      // so take the partial stroke back and hand the gesture to the view.
       this.#stopDrawing();
       this.#locked = true;
-      this.#sink.settled();
+      this.#sink.cancelStroke();
       this.#view.beginPinch([...this.#points.values()]);
       return;
     }

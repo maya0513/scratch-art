@@ -108,14 +108,45 @@ export class WaxHistory {
   endStroke(): boolean {
     if (!this.#open) return false;
     this.#open = false;
-    if (!this.#hasExtent) return false;
+    const rect = this.#extentRect();
+    if (rect === null) return false;
+    this.#push('undo', crop(this.#base, rect));
+    return true;
+  }
+
+  /** Abandon the open stroke, restoring the wax it touched from its base. */
+  cancelStroke(): void {
+    if (!this.#open) return;
+    this.#open = false;
+    const rect = this.#extentRect();
+    if (rect === null) return;
+    const ctx = context2D(this.#wax);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
+    ctx.clearRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.drawImage(
+      this.#base,
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
+      rect.x,
+      rect.y,
+      rect.width,
+      rect.height,
+    );
+  }
+
+  /** The open stroke's touched rectangle, clipped to the paper, if any. */
+  #extentRect(): Rect | null {
+    if (!this.#hasExtent) return null;
     const x = Math.max(0, this.#minX);
     const y = Math.max(0, this.#minY);
     const width = Math.min(this.#surface.pixelWidth, this.#maxX) - x;
     const height = Math.min(this.#surface.pixelHeight, this.#maxY) - y;
-    if (width <= 0 || height <= 0) return false;
-    this.#push('undo', crop(this.#base, { x, y, width, height }));
-    return true;
+    if (width <= 0 || height <= 0) return null;
+    return { x, y, width, height };
   }
 
   undo(): boolean {

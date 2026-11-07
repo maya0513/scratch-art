@@ -120,6 +120,13 @@ export class ScratchSheet implements StrokeSink {
     this.#settle();
   }
 
+  /** Take back the in-progress stroke, as when a pinch gesture claims it. */
+  cancelStroke(): void {
+    this.#painter.discardPending();
+    this.#history.cancelStroke();
+    this.#notifyHistory();
+  }
+
   /** Record a finished stroke once nothing is drawing or left to render. */
   #settle(): void {
     if (this.#input.drawing || this.#painter.scheduled) return;

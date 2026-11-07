@@ -103,3 +103,23 @@ describe('wax history', () => {
     expect(undone).toBe(50);
   });
 });
+
+describe('cancelling a stroke', () => {
+  it('cancelStroke puts back what the stroke removed and records nothing', () => {
+    const f = fixture();
+    f.history.beginStroke();
+    dab(f, 0, 0);
+    f.history.cancelStroke();
+    expect(alphaOf(f.wax, 50, 50)).toBe(COATED);
+    expect(f.history.canUndo).toBe(false);
+    expect(f.history.endStroke()).toBe(false);
+  });
+
+  it('cancelStroke without dabs simply closes the stroke', () => {
+    const f = fixture();
+    f.history.beginStroke();
+    f.history.cancelStroke();
+    expect(f.history.canUndo).toBe(false);
+    expect(alphaOf(f.wax, 50, 50)).toBe(COATED);
+  });
+});
