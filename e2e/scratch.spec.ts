@@ -236,12 +236,63 @@ test('a second touch takes back the partial stroke and locks drawing until every
   await page.mouse.click(x, y + 140);
   await expect.poll(() => alphaAt(page, x, y + 140)).toBeLessThan(230);
   const cancelBase = await alphaAt(page, x + 30, y + 170);
+  const cancelMidBase = await alphaAt(page, x, y + 170);
   await send('pointerdown', 31, 'touch', x - 30, y + 170);
   await send('pointermove', 31, 'touch', x, y + 170);
+  await expect.poll(() => alphaAt(page, x, y + 170)).toBeLessThan(220);
   await send('pointercancel', 31, 'touch', x, y + 170);
   await send('pointermove', 31, 'touch', x + 30, y + 170);
-  await expect.poll(() => alphaAt(page, x, y + 170)).toBeLessThan(220);
+  // A pointercancel means the browser took the pointer away mid-stroke, as
+  // when it claims the touch for its own zoom gesture: the interrupted
+  // stroke is taken back, not kept as a finished one.
+  await expect.poll(() => alphaAt(page, x, y + 170)).toBe(cancelMidBase);
   expect(await alphaAt(page, x + 30, y + 170)).toBe(cancelBase);
+});
+
+test('a wheel zoom during a stroke takes the stroke back', async ({ page }, info) => {
+  if (info.project.use.hasTouch === true) test.skip();
+  await ready(page);
+  const size = viewport(page);
+  const x = Math.floor(size.width / 2);
+  const y = Math.floor(size.height * 0.35);
+  const midBase = await alphaAt(page, x - 10, y);
+  const endBase = await alphaAt(page, x + 40, y);
+  await page.mouse.move(x - 40, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y, { steps: 2 });
+  await expect.poll(() => alphaAt(page, x - 10, y)).toBeLessThan(220);
+  await page.mouse.wheel(0, -600);
+  await page.mouse.move(x + 40, y, { steps: 2 });
+  await page.mouse.up();
+  // Zoom back out to the identity view so client points name the same
+  // paper points as the baselines did.
+  await page.mouse.wheel(0, 2000);
+  await expect.poll(() => alphaAt(page, x - 10, y)).toBe(midBase);
+  expect(await alphaAt(page, x + 40, y)).toBe(endBase);
+  await page.mouse.click(x, y + 60);
+  await expect.poll(() => alphaAt(page, x, y + 60)).toBeLessThan(230);
+});
+
+test('a Safari gesture event during a stroke takes the stroke back', async ({ page }) => {
+  await ready(page);
+  const size = viewport(page);
+  const x = Math.floor(size.width / 2);
+  const y = Math.floor(size.height * 0.35);
+  const canvas = page.locator('.wax-layer');
+  const send = (type: string, id: number, kind: string, cx: number, cy: number): Promise<void> =>
+    canvas.dispatchEvent(type, { pointerId: id, pointerType: kind, clientX: cx, clientY: cy });
+  const midBase = await alphaAt(page, x, y);
+  const endBase = await alphaAt(page, x + 30, y);
+  await send('pointerdown', 71, 'touch', x - 30, y);
+  await send('pointermove', 71, 'touch', x, y);
+  await expect.poll(() => alphaAt(page, x, y)).toBeLessThan(220);
+  await canvas.dispatchEvent('gesturestart');
+  await send('pointermove', 71, 'touch', x + 30, y);
+  await send('pointerup', 71, 'touch', x + 30, y);
+  await expect.poll(() => alphaAt(page, x, y)).toBe(midBase);
+  expect(await alphaAt(page, x + 30, y)).toBe(endBase);
+  await page.mouse.click(x, y + 60);
+  await expect.poll(() => alphaAt(page, x, y + 60)).toBeLessThan(230);
 });
 
 test('undo restores the wax and redo scratches it again', async ({ page }) => {

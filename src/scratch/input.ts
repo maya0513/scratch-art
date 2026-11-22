@@ -28,8 +28,11 @@ export interface StrokeSink {
 
 /**
  * Turns pointer and wheel events on the canvas into strokes and view
- * gestures: one pointer draws, a second pointer starts a pinch, and drawing
- * stays locked until every pointer has lifted.
+ * gestures: one pointer draws, and a zoom gesture — a second pointer, a
+ * Safari gesture event, a browser takeover of the drawing pointer, or a
+ * wheel turned mid-stroke — claims the gesture from the stroke, taking the
+ * partial stroke back. Drawing then stays locked until every pointer has
+ * lifted.
  */
 export class PointerInput {
   readonly #canvas: HTMLCanvasElement;
@@ -51,8 +54,11 @@ export class PointerInput {
     canvas.addEventListener('pointerdown', this.#onDown, options);
     canvas.addEventListener('pointermove', this.#onMove, options);
     canvas.addEventListener('pointerup', this.#onUp, options);
-    canvas.addEventListener('pointercancel', this.#onCancel, options);
+    canvas.addEventListener('pointercancel', this.#onAbort, options);
     canvas.addEventListener('lostpointercapture', this.#onCancel, options);
+    const gestureOptions = { passive: false, signal: this.#abort.signal };
+    canvas.addEventListener('gesturestart', this.#onGesture, gestureOptions);
+    canvas.addEventListener('gesturechange', this.#onGesture, gestureOptions);
     canvas.addEventListener(
       'contextmenu',
       (event) => {
@@ -90,9 +96,7 @@ export class PointerInput {
     if (this.#points.size === 2) {
       // A second pointer starts a pinch: its first finger was never drawing,
       // so take the partial stroke back and hand the gesture to the view.
-      this.#stopDrawing();
-      this.#locked = true;
-      this.#sink.cancelStroke();
+      this.#claimGesture();
       this.#view.beginPinch([...this.#points.values()]);
       return;
     }
@@ -153,6 +157,32 @@ export class PointerInput {
     this.#sink.settled();
   };
 
+  readonly #onAbort = (event: PointerEvent): void => {
+    const wasDrawing = event.pointerId === this.#drawingId;
+    this.#release(event.pointerId);
+    if (!wasDrawing) {
+      this.#sink.settled();
+      return;
+    }
+    // The browser took the drawing pointer away mid-stroke, as it does when
+    // it claims the touch for a zoom gesture of its own: the stroke was
+    // interrupted, not finished, so take its marks back instead of keeping
+    // them as a completed stroke. If another pointer is still down, drawing
+    // stays locked until it lifts too.
+    this.#stopDrawing();
+    this.#sink.cancelStroke();
+    this.#locked = this.#points.size > 0;
+  };
+
+  readonly #onGesture = (event: Readonly<Event>): void => {
+    // Safari announces a pinch with gesture events and can claim the
+    // touches for page zoom without a second pointerdown ever reaching the
+    // canvas. Refuse the page zoom, and claim the gesture for the view:
+    // a stroke caught by it was never meant to be drawn.
+    event.preventDefault();
+    if (this.#drawing !== null) this.#claimGesture();
+  };
+
   readonly #clearActive = (): void => {
     this.#stopDrawing();
     this.#points.clear();
@@ -164,10 +194,22 @@ export class PointerInput {
   readonly #onWheel = (event: Readonly<Event>): void => {
     event.preventDefault();
     if (!(event instanceof WheelEvent)) return;
+    if (this.#drawing !== null) {
+      // Zooming mid-stroke, with a wheel turned while a mouse or pen is
+      // held down, claims the gesture just like a pinch does.
+      this.#claimGesture();
+    }
     const client = { x: event.clientX, y: event.clientY };
     const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 0.0022));
     this.#view.zoomAt(client, this.#view.scale * factor);
   };
+
+  /** Take back the partial stroke and lock drawing until every pointer lifts. */
+  #claimGesture(): void {
+    this.#stopDrawing();
+    this.#locked = true;
+    this.#sink.cancelStroke();
+  }
 
   #eventPoint(event: PointerEvent): Point {
     const rect = this.#canvas.getBoundingClientRect();
